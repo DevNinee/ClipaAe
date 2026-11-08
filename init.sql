@@ -281,16 +281,21 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX user_acquisition_utm_source_utm_campaign_idx ON user_acquisition(utm_source, utm_campaign);
 CREATE INDEX affiliates_status_created_at_idx ON affiliates(status, created_at);
 CREATE INDEX idx_tasks_user_id ON tasks(user_id);
+CREATE INDEX idx_tasks_user_created_at ON tasks(user_id, created_at DESC);
 CREATE INDEX idx_tasks_source_id ON tasks(source_id);
 CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tasks_created_at ON tasks(created_at);
 CREATE INDEX idx_tasks_processing_mode ON tasks(processing_mode);
 CREATE INDEX idx_tasks_completed_at ON tasks(completed_at);
+CREATE INDEX idx_tasks_upload_request_key
+    ON tasks ((source_metadata->>'upload_request_key'))
+    WHERE source_metadata->>'upload_request_key' IS NOT NULL;
 CREATE INDEX idx_tasks_user_workflow ON tasks(user_id, workflow);
 CREATE UNIQUE INDEX idx_tasks_share_token ON tasks(share_token) WHERE share_token IS NOT NULL;
 CREATE INDEX idx_sources_created_at ON sources(created_at);
 CREATE INDEX idx_processing_cache_source_url ON processing_cache(source_url);
 CREATE INDEX idx_generated_clips_task_id ON generated_clips(task_id);
+CREATE INDEX idx_generated_clips_task_order ON generated_clips(task_id, clip_order);
 CREATE INDEX idx_generated_clips_clip_order ON generated_clips(clip_order);
 CREATE INDEX idx_generated_clips_created_at ON generated_clips(created_at);
 CREATE INDEX idx_session_token ON session(token);

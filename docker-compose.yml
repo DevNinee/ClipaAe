@@ -453,6 +453,37 @@ services:
       retries: 3
       start_period: 60s
 
+  # Fast jobs have their own pool so editor/export/social work is not blocked
+  # behind long video generations.
+  fast-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_CPU_ONLY: ${BACKEND_CPU_ONLY:-false}
+    container_name: supoclip-fast-worker
+    platform: "${BACKEND_PLATFORM:-linux/amd64}"
+    command: [".venv/bin/arq", "src.workers.fast_worker.FastWorkerSettings"]
+    volumes:
+      - ./backend/src:/app/src
+      - uploads:/app/uploads
+      - clips:/app/clips
+      - ./backend/fonts:/app/fonts
+      - ./backend/transitions:/app/transitions
+    environment: *worker-environment
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", ".venv/bin/arq", "--check", "src.workers.fast_worker.FastWorkerSettings"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   # AI editing: turns an editor instruction into draft changes with Claude.
   # Its own queue and container, so edits answer in seconds while the main
   # worker renders. Light: no video pipeline is imported.

@@ -1173,10 +1173,16 @@ class TaskService(ClipEditingMixin):
         return task
 
     async def get_user_tasks(
-        self, user_id: str, limit: int = 50
+        self,
+        user_id: str,
+        limit: int = 50,
+        cursor_created_at=None,
+        cursor_id: str | None = None,
     ) -> list[Dict[str, Any]]:
         """Get all tasks for a user."""
-        return await self.task_repo.get_user_tasks(self.db, user_id, limit)
+        return await self.task_repo.get_user_tasks(
+            self.db, user_id, limit, cursor_created_at, cursor_id
+        )
 
     @serialized_task_edit
     async def delete_task(self, task_id: str) -> None:

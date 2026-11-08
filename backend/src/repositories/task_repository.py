@@ -456,29 +456,71 @@ class TaskRepository:
 
     @staticmethod
     async def get_user_tasks(
-        db: AsyncSession, user_id: str, limit: int = 50
+        db: AsyncSession,
+        user_id: str,
+        limit: int = 50,
+        cursor_created_at: Optional[datetime] = None,
+        cursor_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get all tasks for a user."""
-        params = {"user_id": user_id, "limit": limit}
+        params = {
+            "user_id": user_id,
+            "limit": max(1, min(limit, 100)) + 1,
+            "cursor_created_at": cursor_created_at,
+            "cursor_id": cursor_id,
+        }
+        cursor_filter = ""
+        if cursor_created_at is not None and cursor_id:
+            cursor_filter = """
+                AND (t.created_at, t.id) < (:cursor_created_at, :cursor_id)
+            """
         try:
             async with db.begin_nested():
                 # Series, recap and trailer covers are the first output (Part 1),
                 # not the best-scored one: they have no scores.
                 result = await db.execute(
                     text("""
-                        SELECT t.*, s.title as source_title, s.type as source_type, s.url as source_url,
-                               (SELECT COUNT(*) FROM generated_clips WHERE task_id = t.id) as clips_count,
-                               (SELECT MAX(virality_score) FROM generated_clips WHERE task_id = t.id) as top_virality_score,
-                               (SELECT id FROM generated_clips WHERE task_id = t.id
-                                ORDER BY CASE WHEN t.workflow IN ('series', 'recap', 'trailer') THEN clip_order END ASC NULLS LAST,
-                                         virality_score DESC NULLS LAST, clip_order ASC
-                                LIMIT 1) as cover_clip_id
-                        FROM tasks t
+                        WITH user_tasks AS (
+                            SELECT t.*
+                            FROM tasks t
+                            WHERE t.user_id = :user_id
+                            {cursor_filter}
+                            ORDER BY t.created_at DESC
+                            LIMIT :limit
+                        ),
+                        clip_stats AS (
+                            SELECT c.task_id, COUNT(*) AS clips_count,
+                                   MAX(virality_score) AS top_virality_score
+                            FROM generated_clips c
+                            JOIN user_tasks ut ON ut.id = c.task_id
+                            GROUP BY c.task_id
+                        ),
+                        ranked_covers AS (
+                            SELECT c.task_id, c.id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY c.task_id
+                                       ORDER BY
+                                           CASE
+                                               WHEN t.workflow IN ('series', 'recap', 'trailer')
+                                               THEN c.clip_order
+                                           END ASC NULLS LAST,
+                                           c.virality_score DESC NULLS LAST,
+                                           c.clip_order ASC
+                                   ) AS cover_rank
+                            FROM generated_clips c
+                            JOIN user_tasks t ON t.id = c.task_id
+                        )
+                        SELECT t.*, s.title AS source_title, s.type AS source_type, s.url AS source_url,
+                               COALESCE(cs.clips_count, 0) AS clips_count,
+                               cs.top_virality_score,
+                               rc.id AS cover_clip_id
+                        FROM user_tasks t
                         LEFT JOIN sources s ON t.source_id = s.id
-                        WHERE t.user_id = :user_id
+                        LEFT JOIN clip_stats cs ON cs.task_id = t.id
+                        LEFT JOIN ranked_covers rc
+                          ON rc.task_id = t.id AND rc.cover_rank = 1
                         ORDER BY t.created_at DESC
-                        LIMIT :limit
-                    """),
+                    """.format(cursor_filter=cursor_filter)),
                     params,
                 )
         except DBAPIError as exc:
@@ -494,9 +536,10 @@ class TaskRepository:
                     FROM tasks t
                     LEFT JOIN sources s ON t.source_id = s.id
                     WHERE t.user_id = :user_id
+                      {cursor_filter}
                     ORDER BY t.created_at DESC
                     LIMIT :limit
-                """),
+                """.format(cursor_filter=cursor_filter)),
                 params,
             )
 

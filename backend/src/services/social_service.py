@@ -43,7 +43,7 @@ from ..social import (
 )
 from ..social.base import OUTCOME_UNKNOWN_MESSAGE, PRIVACY_LEVELS, redact, redacted_errors
 from ..utils.async_helpers import run_in_thread
-from ..workers.job_queue import DuplicateJobError, JobQueue
+from ..workers.job_queue import FAST_QUEUE_NAME, DuplicateJobError, JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -551,7 +551,9 @@ class SocialService:
         if defer_seconds > 0:
             kwargs["_defer_by"] = timedelta(seconds=defer_seconds)
         try:
-            await self.queue_adapter.enqueue_job(PUBLISH_JOB_NAME, post_id, **kwargs)
+            await self.queue_adapter.enqueue_job(
+                PUBLISH_JOB_NAME, post_id, _queue_name=FAST_QUEUE_NAME, **kwargs
+            )
         except DuplicateJobError:
             # That job is still waiting and will claim the post itself.
             logger.info("Publish job for post %s attempt %s is already queued", post_id, attempts)

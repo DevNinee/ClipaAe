@@ -28,7 +28,7 @@ from ..repositories.clip_export_repository import ClipExportRepository
 from ..repositories.clip_repository import ClipRepository
 from ..repositories.media_repository import queue_delete
 from ..utils.async_helpers import run_in_thread
-from ..workers.job_queue import DuplicateJobError, JobQueue
+from ..workers.job_queue import FAST_QUEUE_NAME, DuplicateJobError, JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -326,14 +326,11 @@ async def start_export(
     )
     await db.commit()
     try:
-        # Stay on supoclip_tasks. ARQ has no priority argument, and deferring
-        # to the past expires the job key immediately (expiry is score minus
-        # enqueue time). supoclip_fast has no worker. A shared max_jobs pool
-        # also cannot reserve a slot without a custom poll loop.
         await queue.enqueue_job(
             CLIP_EXPORT_JOB_NAME,
             export_id,
             _job_id=job_id_for(export_id),
+            _queue_name=FAST_QUEUE_NAME,
         )
     except DuplicateJobError:
         logger.info("Clip export %s is already queued", export_id)

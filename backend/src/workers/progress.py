@@ -3,6 +3,7 @@ Progress tracking using Redis for real-time updates.
 """
 import json
 import logging
+import time
 from typing import Optional
 from redis.asyncio import Redis
 
@@ -16,6 +17,9 @@ class ProgressTracker:
         self.redis = redis
         self.task_id = task_id
         self.key = f"progress:{task_id}"
+        self._last_published_at = 0.0
+        self._last_published_data: tuple[int, str, str] | None = None
+        self._publish_interval_seconds = 0.25
 
     async def update(self, progress: int, message: str, status: str = "processing"):
         """
@@ -39,11 +43,21 @@ class ProgressTracker:
             json.dumps(data)
         )
 
-        # Publish to pub/sub for real-time updates
-        await self.redis.publish(
-            f"progress:{self.task_id}",
-            json.dumps(data)
+        state = (progress, message, status)
+        now = time.monotonic()
+        terminal = status in {"completed", "error"}
+        should_publish = (
+            terminal
+            or state != self._last_published_data
+            and now - self._last_published_at >= self._publish_interval_seconds
         )
+        if should_publish:
+            await self.redis.publish(
+                f"progress:{self.task_id}",
+                json.dumps(data)
+            )
+            self._last_published_at = now
+            self._last_published_data = state
 
         logger.debug(f"Progress update for {self.task_id}: {progress}% - {message}")
 

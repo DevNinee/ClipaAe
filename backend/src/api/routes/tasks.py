@@ -16,11 +16,14 @@ import logging
 from typing import Dict, Any, Optional
 import inspect
 import re
+import base64
+import binascii
 import secrets
 import math
 import asyncio
 import hashlib
 import time
+from datetime import datetime
 from ...utils.async_helpers import run_in_thread
 from ... import clip_archive
 
@@ -483,7 +486,10 @@ def _build_public_task(task: Dict[str, Any], share_token: str) -> Dict[str, Any]
 
 @router.get("/")
 async def list_tasks(
-    request: Request, db: AsyncSession = Depends(get_db), limit: int = 50
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+    cursor: str | None = None,
 ):
     """
     Get all tasks for the authenticated user.
@@ -491,11 +497,34 @@ async def list_tasks(
     user_id = await _get_user_id_from_headers(request, db)
 
     try:
+        if not 1 <= limit <= 100:
+            raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+        cursor_created_at = cursor_id = None
+        if cursor:
+            try:
+                decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+                cursor_created_at, cursor_id = decoded.split("|", 1)
+                cursor_created_at = datetime.fromisoformat(cursor_created_at)
+                if not cursor_id:
+                    raise ValueError
+            except (ValueError, UnicodeDecodeError, binascii.Error):
+                raise HTTPException(status_code=400, detail="Invalid task cursor")
         task_service = TaskService(db)
-        tasks = await task_service.get_user_tasks(user_id, limit)
+        tasks = await task_service.get_user_tasks(
+            user_id, limit, cursor_created_at, cursor_id
+        )
+        has_more = len(tasks) > limit
+        tasks = tasks[:limit]
+        next_cursor = None
+        if has_more and tasks:
+            last = tasks[-1]
+            encoded = f"{last['created_at'].isoformat()}|{last['id']}".encode()
+            next_cursor = base64.urlsafe_b64encode(encoded).decode()
 
-        return {"tasks": tasks, "total": len(tasks)}
+        return {"tasks": tasks, "total": len(tasks), "next_cursor": next_cursor}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving user tasks: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving tasks: {str(e)}")

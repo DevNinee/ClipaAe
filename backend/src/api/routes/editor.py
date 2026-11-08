@@ -27,7 +27,7 @@ from ...services.task_service import TaskService
 from ...services.ai_edit_allowance_service import (
     AIEditAllowanceService, AIEditLimitExceeded, refund_ai_edit_usage,
 )
-from ...workers.job_queue import JobQueue
+from ...workers.job_queue import FAST_QUEUE_NAME, JobQueue
 from ...utils.async_helpers import run_in_thread
 from .tasks import _require_task_owner, _read_json_object
 
@@ -110,7 +110,10 @@ async def prepare(
             return {"status": state["status"]}
         atomic_json(directory / "asset.json", {"status": "preparing"})
     try:
-        await JobQueue.enqueue_job("prepare_editor", task_id, clip_id, clip["filename"])
+        await JobQueue.enqueue_job(
+            "prepare_editor", task_id, clip_id, clip["filename"],
+            _queue_name=FAST_QUEUE_NAME,
+        )
     except Exception:
         atomic_json(
             directory / "asset.json",
@@ -240,7 +243,8 @@ async def start_export(
         )
     try:
         await JobQueue.enqueue_job(
-            "export_editor", task_id, clip_id, clip["filename"], job_id
+            "export_editor", task_id, clip_id, clip["filename"], job_id,
+            _queue_name=FAST_QUEUE_NAME,
         )
     except Exception:
         atomic_json(
@@ -390,7 +394,8 @@ async def combine(task_id: str, request: Request, db: AsyncSession = Depends(get
         )
     try:
         await JobQueue.enqueue_job(
-            "combine_editor", task_id, anchor["id"], anchor["filename"], job_id
+            "combine_editor", task_id, anchor["id"], anchor["filename"], job_id,
+            _queue_name=FAST_QUEUE_NAME,
         )
     except Exception:
         atomic_json(

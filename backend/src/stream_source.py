@@ -247,12 +247,42 @@ def _operation(task_key: str, operation: str) -> _Operation:
 
 # --------------------------------------------------------------------- yt-dlp
 
+def _deadline_hook(budget: float):
+    """socket_timeout only catches a dead connection; a severely throttled one
+    (platform-side rate limiting) keeps trickling bytes and never trips it,
+    so a download can otherwise run for hours. Raising DownloadCancelled from
+    a progress hook is yt-dlp's supported abort path (used for Ctrl+C) and
+    propagates out of extract_info/process_ie_result like any other failure,
+    letting the provider fallback chain move on instead of hanging.
+
+    The clock is per output file, not per call: a sections download writes one
+    file per selected clip in the same yt-dlp invocation, and a throttled-but-
+    working connection can legitimately need several minutes for each one. A
+    single budget shared across every section would let earlier ones eat the
+    later ones' time and cut a healthy download short; starting a fresh clock
+    whenever the filename changes bounds each file on its own merits."""
+    from yt_dlp.utils import DownloadCancelled
+
+    started: dict[str, float] = {}
+
+    def hook(status):
+        filename = str(status.get("filename") or status.get("tmpfilename") or "")
+        now = time.monotonic()
+        start = started.setdefault(filename, now)
+        if now - start > budget:
+            raise DownloadCancelled(f"stream download exceeded {budget:.0f}s budget for one file")
+
+    return hook
+
+
 def _ydl_options(provider, output, *, audio=False, ranges=None, session=None, socket_timeout=10):
     c = get_config()
+    budget = c.stream_download_timeout_seconds
     opts = {
         "outtmpl": str(output), "noplaylist": True, "quiet": True, "no_warnings": True,
         "retries": 1, "fragment_retries": 3, "socket_timeout": socket_timeout,
         "max_filesize": c.youtube_download_max_bytes,
+        "progress_hooks": [_deadline_hook(budget)],
     }
     if provider == "proxy":
         if not c.youtube_proxy_url:

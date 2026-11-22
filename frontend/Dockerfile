@@ -140,12 +140,15 @@ COPY --from=builder --chown=nextjs:nodejs /app/src/generated/prisma ./src/genera
 COPY --from=builder /app/prisma ./prisma
 
 # The production Compose service bind-mounts /app/src for local-development
-# compatibility. Keep the native Prisma engine outside that mount and point
+# compatibility. Keep the native Prisma engines outside that mount and point
 # Prisma at the immutable copy so authentication cannot lose database access.
+# Both engine variants are copied because the image may be built on one
+# architecture and run on another (e.g. an arm64 Mac vs. an amd64 cloud
+# host); the right one is selected at container start, not baked in here.
 COPY --from=builder --chown=nextjs:nodejs \
     /app/src/generated/prisma/libquery_engine-debian-openssl-3.0.x.so.node \
-    /app/prisma-engine/libquery_engine-debian-openssl-3.0.x.so.node
-ENV PRISMA_QUERY_ENGINE_LIBRARY=/app/prisma-engine/libquery_engine-debian-openssl-3.0.x.so.node
+    /app/src/generated/prisma/libquery_engine-linux-arm64-openssl-3.0.x.so.node \
+    /app/prisma-engine/
 
 USER nextjs
 
@@ -154,5 +157,12 @@ EXPOSE 3107
 ENV PORT=3107
 ENV HOSTNAME="0.0.0.0"
 
-# Start the application
-CMD ["node", "server.js"]
+# Start the application. PRISMA_QUERY_ENGINE_LIBRARY must match the
+# container's actual architecture at runtime, not the build machine's.
+CMD ["sh", "-c", "set -e; \
+case \"$(uname -m)\" in \
+  aarch64|arm64) engine=linux-arm64-openssl-3.0.x ;; \
+  *) engine=debian-openssl-3.0.x ;; \
+esac; \
+export PRISMA_QUERY_ENGINE_LIBRARY=\"/app/prisma-engine/libquery_engine-${engine}.so.node\"; \
+exec node server.js"]

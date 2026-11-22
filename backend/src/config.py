@@ -97,6 +97,16 @@ class Config:
         self.apify_long_video_seconds = int(
             os.getenv("APIFY_LONG_VIDEO_SECONDS", "1800")
         )
+        # yt-dlp has no built-in ceiling on download wall-clock time; a
+        # throttled stream (e.g. Twitch rate-limiting an unproxied IP) can
+        # otherwise run for hours without ever hitting socket_timeout, since
+        # data keeps trickling in. Applied per output file (see stream_source
+        # ._deadline_hook) so a multi-section download isn't cut short by
+        # earlier sections' time; a stalled file fails fast and the provider
+        # chain falls through instead of pegging the worker indefinitely.
+        self.stream_download_timeout_seconds = self._get_int_env(
+            "STREAM_DOWNLOAD_TIMEOUT_SECONDS", 1200
+        )
 
         self.max_video_duration = int(os.getenv("MAX_VIDEO_DURATION", "5400"))
         # YouTube sources can be longer on paid tiers. Uploads continue to use

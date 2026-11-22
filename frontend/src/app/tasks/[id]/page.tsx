@@ -130,6 +130,7 @@ interface TaskDetails extends WorkflowTaskFields {
   source_duration_seconds?: number | null;
   created_at: string;
   updated_at: string;
+  started_at?: string | null;
   font_family?: string | null;
   font_size?: number | null;
   font_color?: string | null;
@@ -377,7 +378,12 @@ export default function TaskPage() {
         setTask(taskData);
         return true;
       } catch (err) {
-        console.error("Error fetching task data:", err);
+        // Background polls retry on the next tick, so a transient network blip
+        // (fetch itself rejecting) isn't an application error. A real HTTP
+        // failure (bad session, deleted task, 5xx) still logs loud so a
+        // genuinely broken task page doesn't look like network noise.
+        if (background && err instanceof TypeError) console.warn("Background task refresh failed:", err);
+        else console.error("Error fetching task data:", err);
         if (!background) setError(err instanceof Error ? err.message : t("errors.load"));
         return false;
       }
@@ -990,7 +996,7 @@ export default function TaskPage() {
 
         {isActive && task ? (
           <div className="space-y-8">
-            <ProcessingPanel status={task.status} progress={progress} message={progressMessage} startedAt={Date.parse(task.created_at)} workflow={workflow} />
+            <ProcessingPanel status={task.status} progress={progress} message={progressMessage} startedAt={Date.parse(task.started_at ?? task.created_at)} workflow={workflow} />
             <ProcessingSlots status={task.status} progress={progress} message={progressMessage}
               className={SINGLE_OUTPUT.has(workflow) ? "mx-auto max-w-[16rem] grid-cols-1 sm:grid-cols-1 lg:grid-cols-1 xl:grid-cols-1" : undefined}
               total={clipProgressFromMessage(progressMessage)?.total ?? Math.max(clips.length, expectedTotal)}>
